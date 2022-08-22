@@ -1,4 +1,6 @@
 #pragma once
+#include <iostream>
+#include <boost/program_options.hpp>
 
 class command_line_parser
 {
@@ -11,7 +13,7 @@ public:
     /// @param av Указатель на параметры строки запуска
     command_line_parser(int ac, char **av, const std::string& program_name)
             : m_desc(program_name), m_argc(ac), m_argv(av) {
-        m_desc.add_options()("help,h", "Output this window")("verbose,v", "Output program information");
+        m_desc.add_options()("help,?", "Output this window")("verbose,v", "Output program information");
     }
 
     /// @brief Если есть параметр   help то вывести окно с помощью
@@ -50,10 +52,8 @@ public:
     template<typename T>
     void add_options(const std::string& abbreviate, const std::string& value)
     {
-        {
             m_desc.add_options()(
                     abbreviate.c_str(), boost::program_options::value<T>(), value.c_str());
-        }
     }
     void init() {
         namespace po = boost::program_options;

@@ -1,11 +1,25 @@
 #include <string>
-#include "command_line_parser.h"
+#include <boost/program_options.hpp>
+#include <iostream>
+#include <vector>
 
-int main(int ac, char** av){
-    command_line_parser parser(ac, av, "Registry Server");
+namespace po = boost::program_options;
 
-    parser.add_options<std::string>("config,c", "Set path to config(*.xml) file");
-    parser.add_options<std::string>("logfile,l", "Set path to log file");
-    parser.add_options<long long>("size,s", "Set size of log file");
+int main(int argc, char** argv){
+    po::options_description desc;
+    desc.add_options()
+            ("help", "produce help message")
+            ("include,i", po::value< std::vector<std::string> >()
+                    ->composing()->multitoken(), "include directories")
+            ("exclude,e", po::value< std::vector<std::string> >()
+                    ->composing()->multitoken(), "exclude directories")
+            ("level,l", po::value< int >()->default_value(0), "scanning level")
+            ;
+    po::variables_map vm;
+    store(parse_command_line(argc, argv, desc), vm);
 
+    notify(vm);
+
+    for(auto& s : vm["exclude"].as<std::vector<std::string>>())
+        std::cout << s << std::endl;
 }
