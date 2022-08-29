@@ -9,7 +9,7 @@
 #include <list>
 #include <array>
 #include <iomanip>
-
+#include <stack>
 
 namespace po = boost::program_options;
 
@@ -56,33 +56,59 @@ struct comparator{
     bool isOpen = true;
 };
 
-void compareFiles(std::vector<file_info>& vec, size_t block_size){
-    std::list<comparator> list;
+struct hash_digits{
+    unsigned int digits[5];
+    std::string path_;
+    hash_digits(const char* str, size_t block_size, std::string path) : path_(path) {
+        boost::uuids::detail::sha1 sha;
+        sha.process_bytes(str, block_size);
+        sha.get_digest(digits);
+    }
+
+    bool operator<(const hash_digits& other) const {
+        return std::tie(this->digits[0],this->digits[1],this->digits[2],this->digits[3],this->digits[4]) <
+                std::tie(other.digits[0],other.digits[1],other.digits[2],other.digits[3],other.digits[4]);
+    }
+    bool operator==(const hash_digits& other) const {
+        return std::tie(this->digits[0],this->digits[1],this->digits[2],this->digits[3],this->digits[4]) ==
+               std::tie(other.digits[0],other.digits[1],other.digits[2],other.digits[3],other.digits[4]);
+    }
+};
+
+void compareFiles(std::vector<file_info>& vec, size_t block_size, size_t chunk_cnt){
+    struct file_in{
+        std::string path;
+        std::fstream* fs;
+    };
+//    std::list<comparator> list;
     std::vector<char> buf(block_size, 0);
-    std::map<boost::uuids::detail::sha1, int> hash;
-
-
+    std::map<hash_digits, int> hash;
+    std::map<std::string, std::fstream> opened_files;
     for(auto& elem : vec) {
-        list.emplace_back(elem.filepath);
+        opened_files[elem.filepath] = std::fstream(elem.filepath);
+    }
+    std::vector<file_in> stack;
+    std::vector<file_in> stack_n;
+    for(auto& elem : vec) {
+        stack.push_back({elem.filepath, std::make_shared<std::fstream>(elem.filepath)});
     }
 
     boost::uuids::detail::sha1 h;
-    bool notEndOfFile = true;
-
-    while(notEndOfFile) {
-        for(auto& elem : list) {
-            boost::uuids::detail::sha1 h;
-            elem.fs_.read(&buf[0], block_size);
+    size_t offset = 0;
+    while(--chunk_cnt) {
+        std::vector<std::fstream*> stack;
+        for(auto& elem : opened_files)
+            stack.push_back(&elem.second);
+        for(auto& elem: stack) {
+            elem->read(&buf[0], block_size);
             h.process_bytes(&buf[0], block_size);
-            hash[h]++;
+            hash_digits dig(&buf[0], block_size, elem);
+            hash[dig]++;
         }
-
     }
 
-
-
-    for(auto& file : list) {
-        file.fs_.close();
+    for(auto& file : stack) {
+        file.fs->close();
     }
 }
 
@@ -140,7 +166,7 @@ int main(int argc, char** argv){
 
     for(auto& filevec : blockCnt_fileInfos) {
         if(filevec.second.size() > 1) {
-            compareFiles(filevec.second, block_size);
+            compareFiles(filevec.second, block_size, filevec.first);
             std::cout << std::endl;
         }
     }
