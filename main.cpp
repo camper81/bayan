@@ -58,8 +58,7 @@ struct comparator{
 
 struct hash_digits{
     unsigned int digits[5];
-    std::string path_;
-    hash_digits(const char* str, size_t block_size, std::string path) : path_(path) {
+    hash_digits(const char* str, size_t block_size) {
         boost::uuids::detail::sha1 sha;
         sha.process_bytes(str, block_size);
         sha.get_digest(digits);
@@ -75,45 +74,70 @@ struct hash_digits{
     }
 };
 
-void compareFiles(std::vector<file_info>& vec, size_t block_size, size_t chunk_cnt){
-    struct file_in{
-        std::string path;
+void compareFiles(std::vector<std::string>& filenames, size_t block_size, size_t chunk_cnt){
+    struct file {
         std::fstream* fs;
     };
-//    std::list<comparator> list;
+
+    struct identity {
+        int same_files;
+        std::vector<std::pair<std::fstream*, std::string>> open_files;
+    };
+
     std::vector<char> buf(block_size, 0);
-    std::map<hash_digits, int> hash;
+
     std::map<std::string, std::fstream> opened_files;
-    for(auto& elem : vec) {
-        opened_files[elem.filepath] = std::fstream(elem.filepath);
+
+    for(auto& elem : filenames) {
+        opened_files[elem] = std::fstream(elem);
     }
-    std::vector<file_in> stack;
-    std::vector<file_in> stack_n;
-    for(auto& elem : vec) {
-        stack.push_back({elem.filepath, std::make_shared<std::fstream>(elem.filepath)});
+
+    std::vector<std::vector<std::pair<std::fstream*, std::string>>> stack;
+    {
+        std::vector<std::pair<std::fstream*, std::string>> sub_vector;
+        for(auto& elem : opened_files) {
+            sub_vector.emplace_back(&elem.second, elem.first);
+        }
+        stack.push_back(sub_vector);
     }
 
     boost::uuids::detail::sha1 h;
-    size_t offset = 0;
     while(--chunk_cnt) {
-        std::vector<std::fstream*> stack;
-        for(auto& elem : opened_files)
-            stack.push_back(&elem.second);
-        for(auto& elem: stack) {
-            elem->read(&buf[0], block_size);
-            h.process_bytes(&buf[0], block_size);
-            hash_digits dig(&buf[0], block_size, elem);
-            hash[dig]++;
+        std::map<hash_digits, identity> hash;
+        for(auto& sub_vector: stack) {
+            for(auto& elem: sub_vector) {
+                elem.first->read(&buf[0], block_size);
+                h.process_bytes(&buf[0], block_size);
+                hash_digits dig(&buf[0], block_size);
+                hash[dig].same_files++;
+                hash[dig].open_files.push_back(elem);
+            }
         }
+
+        stack.clear();
+
+        for(auto& elem: hash) {
+            if(elem.second.same_files > 1) {
+                stack.emplace_back(elem.second.open_files);
+            }
+        }
+
     }
 
-    for(auto& file : stack) {
-        file.fs->close();
+    for(auto& filevec : stack) {
+        for(auto& file : filevec) {
+            std::cout << file.second << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
+    for(auto& file : opened_files) {
+        file.second.close();
     }
 }
 
 int main(int argc, char** argv){
-    std::map<size_t, std::vector<file_info>> blockCnt_fileInfos;
+    std::map<size_t, std::vector<std::string>> cntBlocksToFilename;
 
     po::options_description desc;
     desc.add_options()
@@ -122,7 +146,7 @@ int main(int argc, char** argv){
                     ->composing()->multitoken(), "include directories")
             ("exclude,e", po::value< std::vector<std::string> >()
                     ->composing()->multitoken(), "exclude directories")
-            ("level,l", po::value< int >()->default_value(0), "scanning level")
+            ("level,l", po::value< int >(), "scanning level")
             ("hash,h", po::value<std::string>()->default_value("crc32"), "set hash function")
             ("size,s", po::value<int>()->default_value(4), "set block size")
             ;
@@ -140,31 +164,41 @@ int main(int argc, char** argv){
             std::cout << s << std::endl;
     }
 
-
     const int block_size = vm["size"].as<int>();
     std::vector<char> buf(block_size, 0);
 
-    boost::filesystem::recursive_directory_iterator it(boost::filesystem::current_path());
-    for(auto& d : it){
-        std::cout << it.level() << std::endl;
-        std::cout << d.path() << std::endl;
+    std::vector<boost::filesystem::recursive_directory_iterator> check_directories;
+    if(vm.count("include"))
+        for(auto& dir : vm["include"].as<std::vector<std::string>>()) {
+            check_directories.emplace_back(dir);
+        }
 
+    if(check_directories.empty())
+            check_directories.emplace_back(boost::filesystem::current_path());
 
-        if(boost::filesystem::is_regular(d.path())) {
-            blockCnt_fileInfos[boost::filesystem::file_size(d.path())/ block_size].emplace_back(d.path().string());
-                boost::uuids::detail::sha1 h;
-                std::fstream file(d.path().string());
-                file.read(&buf[0], block_size);
-                h.process_bytes(&buf[0], block_size);
-//                unsigned int digest[5];
-//                h.get_digest(digest);
-//                for(auto d : digest) {
-//                    std::cout << std::hex << std::setfill('0') << std::setw(8) << d << std::endl;
-//                }
+    for(auto& dir : check_directories) {
+        for(auto& r_it: dir){
+            if(vm.count("level") && (dir.level() > vm["level"].as<int>()))
+                continue;
+            std::cout << dir.level() << std::endl;
+//            std::cout << r_it.path().branch_path().string() << std::endl;
+            if(vm.count("exclude"))
+                if(std::find(vm["exclude"].as<std::vector<std::string>>().begin(),
+                             vm["exclude"].as<std::vector<std::string>>().end(),
+                             r_it.path().branch_path()) != vm["exclude"].as<std::vector<std::string>>().end())
+                    continue;
+
+            std::cout << r_it.path().branch_path() << std::endl;
+
+            if(boost::filesystem::is_regular(r_it.path())) {
+                cntBlocksToFilename[boost::filesystem::file_size(r_it.path())/ block_size].emplace_back(r_it.path().string());
+
+            }
         }
     }
 
-    for(auto& filevec : blockCnt_fileInfos) {
+    for(auto& filevec : cntBlocksToFilename) {
+        // with the same numbers of blocks
         if(filevec.second.size() > 1) {
             compareFiles(filevec.second, block_size, filevec.first);
             std::cout << std::endl;
