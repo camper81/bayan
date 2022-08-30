@@ -175,7 +175,7 @@ int main(int argc, char** argv){
     for(auto& filevec : cntBlocksToFilename) {
         // with the same numbers of blocks
         if(filevec.second.size() > 1) {
-            if(vm.count("hash") && vm["hash"].as<std::string>() == "md5")
+            if(vm["hash"].as<std::string>() == "md5")
                 compareFiles<hash_md5_digits>(filevec.second, block_size, filevec.first);
             else
                 compareFiles<hash_sha_digits>(filevec.second, block_size, filevec.first);
