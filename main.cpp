@@ -119,12 +119,15 @@ int main(int argc, char** argv){
             ("exclude,e", po::value< std::vector<std::string> >()
                     ->composing()->multitoken(), "exclude directories")
             ("level,l", po::value< int >(), "scanning level")
-            ("hash,h", po::value<std::string>()->default_value("crc32"), "set hash function")
-            ("size,s", po::value<int>()->default_value(4), "set block size")
+            ("hash,h", po::value<std::string>()->default_value("sha"), "set hash function sha/md5 default sha")
+            ("size,s", po::value<int>()->default_value(4), "set block size default 4")
             ("pattern,p", po::value<std::string>(), "pattern for scanning file example \"text(\\\\d+).txt\"")
             ;
     po::variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
+
+    if(vm.count("help"))
+        std::cout << desc << std::endl;
 
     const int block_size = vm["size"].as<int>();
     std::vector<char> buf(block_size, 0);
